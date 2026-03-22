@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # Define Colors
 GREEN='\033[0;32m'
@@ -14,14 +14,48 @@ echo -e "${BLUE}=======================================${NC}"
 # Configuration
 DOWNLOAD_URL="https://github.com/accnet/Public/raw/refs/heads/main/wiretify/wiretify.zip" # TODO: Update this URL to point to your wiretify.zip
 TMP_DIR="/tmp/wiretify_install"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_ENV_FILE=""
 APP_PORT="${APP_PORT:-8080}"
 WG_PORT="${WG_PORT:-51820}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin}"
+WG_PRIVATE_KEY="${WG_PRIVATE_KEY:-}"
+
+load_env_file() {
+    local env_file="$1"
+    if [ -f "$env_file" ]; then
+        echo -e "${GREEN}[+] Loading configuration from ${env_file}...${NC}"
+        set -a
+        # shellcheck disable=SC1090
+        . "$env_file"
+        set +a
+        SOURCE_ENV_FILE="$env_file"
+    fi
+}
+
+validate_port() {
+    local port_name="$1"
+    local port_value="$2"
+    if ! [[ "$port_value" =~ ^[0-9]+$ ]] || [ "$port_value" -lt 1 ] || [ "$port_value" -gt 65535 ]; then
+        echo -e "${RED}Invalid ${port_name}: ${port_value}. Expected a number between 1 and 65535.${NC}"
+        exit 1
+    fi
+}
 
 # 1. Check Root
 if [ "$EUID" -ne 0 ]; then
   echo -e "${RED}Please run as root (use sudo)!${NC}"
   exit 1
 fi
+
+if [ -f "$PWD/.env" ]; then
+    load_env_file "$PWD/.env"
+elif [ -f "$SCRIPT_DIR/.env" ]; then
+    load_env_file "$SCRIPT_DIR/.env"
+fi
+
+validate_port "APP_PORT" "$APP_PORT"
+validate_port "WG_PORT" "$WG_PORT"
 
 # 2. Check and Install WireGuard & iptables
 echo -e "${GREEN}[+] Checking and installing dependencies...${NC}"
@@ -36,6 +70,19 @@ elif [ -x "$(command -v yum)" ]; then
 else
     echo -e "${RED}Unsupported package manager. Please install wireguard and iptables manually.${NC}"
     exit 1
+fi
+
+if [ -z "$WG_PRIVATE_KEY" ] && [ -f /opt/wiretify/.env ]; then
+    EXISTING_PRIVATE_KEY="$(grep '^WG_PRIVATE_KEY=' /opt/wiretify/.env | tail -n1 | cut -d= -f2- || true)"
+    if [ -n "$EXISTING_PRIVATE_KEY" ]; then
+        WG_PRIVATE_KEY="$EXISTING_PRIVATE_KEY"
+        echo -e "${BLUE}[*] Reusing existing WG_PRIVATE_KEY from /opt/wiretify/.env${NC}"
+    fi
+fi
+
+if [ -z "$WG_PRIVATE_KEY" ]; then
+    echo -e "${GREEN}[+] Generating WireGuard server private key...${NC}"
+    WG_PRIVATE_KEY="$(wg genkey)"
 fi
 
 # Enable IPv4 forwarding in kernel
@@ -109,18 +156,14 @@ WantedBy=multi-user.target
 EOF
 
 # 7. Initial configuration (.env)
-if [ ! -f /opt/wiretify/.env ]; then
-    echo -e "${GREEN}[+] Creating initial .env with default password 'admin'...${NC}"
-    cat <<EOF > /opt/wiretify/.env
+echo -e "${GREEN}[+] Writing /opt/wiretify/.env...${NC}"
+cat <<EOF > /opt/wiretify/.env
 APP_PORT=${APP_PORT}
 WG_PORT=${WG_PORT}
-ADMIN_PASSWORD=admin
+ADMIN_PASSWORD=${ADMIN_PASSWORD}
+WG_PRIVATE_KEY=${WG_PRIVATE_KEY}
 EOF
-    chmod 600 /opt/wiretify/.env
-else
-    grep -q '^APP_PORT=' /opt/wiretify/.env || echo "APP_PORT=${APP_PORT}" >> /opt/wiretify/.env
-    grep -q '^WG_PORT=' /opt/wiretify/.env || echo "WG_PORT=${WG_PORT}" >> /opt/wiretify/.env
-fi
+chmod 600 /opt/wiretify/.env
 
 # 8. Start Service
 echo -e "${GREEN}[+] Starting Wiretify service...${NC}"
@@ -132,8 +175,11 @@ systemctl restart wiretify
 echo -e "${BLUE}=======================================${NC}"
 echo -e "${GREEN}Wiretify deployed successfully!${NC}"
 echo -e "Dashboard: http://${PUBLIC_IP}:${APP_PORT}"
-echo -e "Initial Password: admin (Please change it immediately in the dashboard!)"
+echo -e "Admin Password: ${ADMIN_PASSWORD}"
 echo -e "Config File: /opt/wiretify/.env"
+if [ -n "$SOURCE_ENV_FILE" ]; then
+    echo -e "Source Env: ${SOURCE_ENV_FILE}"
+fi
 echo -e "WireGuard Port: ${WG_PORT} (Ensure this UDP port is open in your VPS firewall)"
 echo -e "Service Status: systemctl status wiretify"
 echo -e "To view logs run: journalctl -fu wiretify"
