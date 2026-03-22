@@ -14,6 +14,8 @@ echo -e "${BLUE}=======================================${NC}"
 # Configuration
 DOWNLOAD_URL="https://github.com/accnet/Wiretify/raw/refs/heads/main/deploy/wiretify.zip" # TODO: Update this URL to point to your wiretify.zip
 TMP_DIR="/tmp/wiretify_install"
+APP_PORT="${APP_PORT:-8080}"
+WG_PORT="${WG_PORT:-51820}"
 
 # 1. Check Root
 if [ "$EUID" -ne 0 ]; then
@@ -45,17 +47,17 @@ fi
 sysctl -p > /dev/null || sysctl -w net.ipv4.ip_forward=1 > /dev/null
 
 # Configure Firewall Ports
-echo -e "${GREEN}[+] Configuring Firewall ports (8080/TCP, 51820/UDP)...${NC}"
+echo -e "${GREEN}[+] Configuring Firewall ports (${APP_PORT}/TCP, ${WG_PORT}/UDP)...${NC}"
 if [ -x "$(command -v ufw)" ] && ufw status | grep -q "Status: active"; then
-    ufw allow 8080/tcp
-    ufw allow 51820/udp
+    ufw allow "${APP_PORT}/tcp"
+    ufw allow "${WG_PORT}/udp"
 elif [ -x "$(command -v firewall-cmd)" ] && systemctl is-active --quiet firewalld; then
-    firewall-cmd --add-port=8080/tcp --permanent
-    firewall-cmd --add-port=51820/udp --permanent
+    firewall-cmd --add-port="${APP_PORT}/tcp" --permanent
+    firewall-cmd --add-port="${WG_PORT}/udp" --permanent
     firewall-cmd --reload
 elif [ -x "$(command -v iptables)" ]; then
-    iptables -C INPUT -p tcp --dport 8080 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 8080 -j ACCEPT
-    iptables -C INPUT -p udp --dport 51820 -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport 51820 -j ACCEPT
+    iptables -C INPUT -p tcp --dport "${APP_PORT}" -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport "${APP_PORT}" -j ACCEPT
+    iptables -C INPUT -p udp --dport "${WG_PORT}" -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport "${WG_PORT}" -j ACCEPT
 fi
 
 # 3. Determine Public IP
@@ -109,8 +111,15 @@ EOF
 # 7. Initial configuration (.env)
 if [ ! -f /opt/wiretify/.env ]; then
     echo -e "${GREEN}[+] Creating initial .env with default password 'admin'...${NC}"
-    echo "ADMIN_PASSWORD=admin" > /opt/wiretify/.env
+    cat <<EOF > /opt/wiretify/.env
+APP_PORT=${APP_PORT}
+WG_PORT=${WG_PORT}
+ADMIN_PASSWORD=admin
+EOF
     chmod 600 /opt/wiretify/.env
+else
+    grep -q '^APP_PORT=' /opt/wiretify/.env || echo "APP_PORT=${APP_PORT}" >> /opt/wiretify/.env
+    grep -q '^WG_PORT=' /opt/wiretify/.env || echo "WG_PORT=${WG_PORT}" >> /opt/wiretify/.env
 fi
 
 # 8. Start Service
@@ -122,10 +131,10 @@ systemctl restart wiretify
 # 9. Announce
 echo -e "${BLUE}=======================================${NC}"
 echo -e "${GREEN}Wiretify deployed successfully!${NC}"
-echo -e "Dashboard: http://${PUBLIC_IP}:8080"
+echo -e "Dashboard: http://${PUBLIC_IP}:${APP_PORT}"
 echo -e "Initial Password: admin (Please change it immediately in the dashboard!)"
 echo -e "Config File: /opt/wiretify/.env"
-echo -e "WireGuard Port: 51820 (Ensure this UDP port is open in your VPS firewall)"
+echo -e "WireGuard Port: ${WG_PORT} (Ensure this UDP port is open in your VPS firewall)"
 echo -e "Service Status: systemctl status wiretify"
 echo -e "To view logs run: journalctl -fu wiretify"
 echo -e "${BLUE}=======================================${NC}"
