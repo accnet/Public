@@ -7,7 +7,7 @@ Wiretify is a high-performance, minimalist WireGuard management tool written in 
 To automatically install and deploy Wiretify on your fresh VPS (Ubuntu, Debian, CentOS) in under a minute, run the following command:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/accnet/Wiretify/refs/heads/main/deploy/install.sh | sudo bash
+wget -qO- https://raw.githubusercontent.com/accnet/Public/refs/heads/main/wiretify/install.sh | sudo bash
 ```
 
 ### What the installer does:
