@@ -62,13 +62,13 @@ if command -v ufw >/dev/null 2>&1; then
     ufw --force enable
     ufw allow 80/tcp
     ufw allow 443/tcp
-    ufw allow 8080/tcp
+    ufw allow 8888/tcp
 elif command -v firewall-cmd >/dev/null 2>&1; then
     log "Configuring firewalld..."
     systemctl enable --now firewalld
     firewall-cmd --permanent --add-service=http
     firewall-cmd --permanent --add-service=https
-    firewall-cmd --permanent --add-port=8080/tcp
+    firewall-cmd --permanent --add-port=8888/tcp
     firewall-cmd --reload
 else
     log "No firewall tool detected. Skipping firewall configuration."
@@ -152,9 +152,9 @@ IP_ADDRESS=$(curl -s --connect-timeout 2 ifconfig.me || hostname -I | awk '{prin
 echo -e "${GREEN}==============================================${NC}"
 echo -e "${GREEN}   TRIỂN KHAI PRODUCTION HOÀN TẤT!   ${NC}"
 echo -e "${GREEN}==============================================${NC}"
-echo -e "Địa chỉ Panel: http://$IP_ADDRESS:8080"
+echo -e "Địa chỉ Panel: http://$IP_ADDRESS:8888"
 echo -e "Thư mục cài đặt: $INSTALL_DIR"
 echo -e "Trạng thái Service: systemctl status wootify-panel"
 echo -e "Xem Logs: journalctl -u wootify-panel -f"
 echo -e "${GREEN}==============================================${NC}"
-echo -e "${YELLOW}Lưu ý: Đừng quên mở cổng 8080 trên Firewall của bạn.${NC}"
+echo -e "${YELLOW}Lưu ý: Đừng quên mở cổng 8888 trên Firewall của bạn.${NC}"
