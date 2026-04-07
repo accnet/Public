@@ -33,6 +33,18 @@ log() {
     echo -e "${GREEN}[INFO] $1${NC}"
 }
 
+replace_or_append_env() {
+    local key="$1"
+    local value="$2"
+    local env_file="$3"
+
+    if grep -qE "^${key}=" "$env_file" 2>/dev/null; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$env_file"
+    else
+        echo "${key}=${value}" >> "$env_file"
+    fi
+}
+
 # Kiểm tra quyền root
 if [ "$EUID" -ne 0 ]; then
   echo -e "${RED}Vui lòng chạy script với quyền root (sudo).${NC}"
@@ -118,6 +130,11 @@ if [ ! -f ".env" ]; then
     cp .env.example .env || touch .env
     echo -e "${YELLOW}Đã tạo file .env từ mẫu. Vui lòng cập nhật cấu hình nếu cần.${NC}"
 fi
+
+# Chuẩn hóa cấu hình production mặc định
+replace_or_append_env "GIN_MODE" "release" ".env"
+replace_or_append_env "PANEL_LISTEN_ADDR" ":8888" ".env"
+replace_or_append_env "PANEL_COOKIE_SECURE" "true" ".env"
 
 # 5. Cấu hình Systemd (Triển khai nhanh)
 echo -e "${GREEN}[4/4] Đang thiết lập Systemd Service...${NC}"
