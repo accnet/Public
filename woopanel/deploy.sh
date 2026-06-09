@@ -61,6 +61,8 @@ if ! command -v unzip &> /dev/null; then
         apt-get update && apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" unzip curl
     elif command -v dnf &> /dev/null; then
         dnf install -y unzip curl
+    elif command -v yum &> /dev/null; then
+        yum install -y unzip curl
     else
         echo -e "${RED}Không thể cài đặt unzip. Vui lòng cài thủ công.${NC}"
         exit 1
@@ -69,19 +71,40 @@ fi
 
 # -------------------------------------------------
 # 2b. Cài đặt và cấu hình firewall (ufw cho Debian/Ubuntu, firewalld cho RHEL)
-if command -v ufw >/dev/null 2>&1; then
-    log "Configuring ufw firewall..."
-    ufw --force enable
-    ufw allow 80/tcp
-    ufw allow 443/tcp
-    ufw allow 8888/tcp
-elif command -v firewall-cmd >/dev/null 2>&1; then
-    log "Configuring firewalld..."
-    systemctl enable --now firewalld
-    firewall-cmd --permanent --add-service=http
-    firewall-cmd --permanent --add-service=https
-    firewall-cmd --permanent --add-port=8888/tcp
-    firewall-cmd --reload
+if command -v apt-get >/dev/null 2>&1; then
+    if ! command -v ufw >/dev/null 2>&1; then
+        log "Installing ufw firewall..."
+        apt-get update && apt-get install -y ufw
+    fi
+
+    if command -v ufw >/dev/null 2>&1; then
+        log "Configuring ufw firewall..."
+        ufw allow OpenSSH || ufw allow 22/tcp
+        ufw allow 80/tcp
+        ufw allow 443/tcp
+        ufw allow 8888/tcp
+        ufw --force enable
+    fi
+elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+    PKG_CMD="dnf"
+    if ! command -v dnf >/dev/null 2>&1; then
+        PKG_CMD="yum"
+    fi
+
+    if ! command -v firewall-cmd >/dev/null 2>&1; then
+        log "Installing firewalld..."
+        "$PKG_CMD" install -y firewalld
+    fi
+
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        log "Configuring firewalld..."
+        systemctl enable --now firewalld
+        firewall-cmd --permanent --add-service=ssh
+        firewall-cmd --permanent --add-service=http
+        firewall-cmd --permanent --add-service=https
+        firewall-cmd --permanent --add-port=8888/tcp
+        firewall-cmd --reload
+    fi
 else
     log "No firewall tool detected. Skipping firewall configuration."
 fi
@@ -116,8 +139,25 @@ fi
 # 4. Giải nén và thiết lập thư mục
 echo -e "${GREEN}[3/4] Đang giải nén vào $INSTALL_DIR...${NC}"
 mkdir -p "$INSTALL_DIR"
+
+# Backup .env trước khi giải nén — unzip -o sẽ ghi đè .env bằng
+# .env.example từ bản release, làm mất PANEL_PASSWORD và các tùy chỉnh.
+ENV_BACKUP=""
+if [ -f "$INSTALL_DIR/.env" ]; then
+    ENV_BACKUP="$(mktemp)"
+    cp "$INSTALL_DIR/.env" "$ENV_BACKUP"
+    echo -e "${YELLOW}Đã backup .env hiện tại trước khi giải nén.${NC}"
+fi
+
 unzip -o "$TEMP_ZIP" -d "$INSTALL_DIR"
 rm -f "$TEMP_ZIP" # Dọn dẹp sau khi giải nén thành công
+
+# Khôi phục .env từ backup nếu có.
+if [ -n "$ENV_BACKUP" ] && [ -f "$ENV_BACKUP" ]; then
+    cp "$ENV_BACKUP" "$INSTALL_DIR/.env"
+    rm -f "$ENV_BACKUP"
+    echo -e "${YELLOW}Đã khôi phục .env từ backup.${NC}"
+fi
 
 cd "$INSTALL_DIR"
 chmod +x panel
@@ -125,7 +165,7 @@ chmod -R +x scripts/
 mkdir -p storage
 chmod 755 storage
 
-# Tạo .env nếu chưa có
+# Tạo .env nếu chưa có (lần đầu deploy)
 if [ ! -f ".env" ]; then
     cp .env.example .env || touch .env
     echo -e "${YELLOW}Đã tạo file .env từ mẫu. Vui lòng cập nhật cấu hình nếu cần.${NC}"
@@ -174,4 +214,4 @@ echo -e "Thư mục cài đặt: $INSTALL_DIR"
 echo -e "Trạng thái Service: systemctl status wootify-panel"
 echo -e "Xem Logs: journalctl -u wootify-panel -f"
 echo -e "${GREEN}==============================================${NC}"
-echo -e "${YELLOW}Lưu ý: Đừng quên mở cổng 8888 trên Firewall của bạn.${NC}"
+echo -e "${YELLOW}Lưu ý: Script đã mở 80/443/8888 trên firewall hệ điều hành nếu có thể. Hãy kiểm tra thêm firewall/security group của nhà cung cấp VPS.${NC}"
