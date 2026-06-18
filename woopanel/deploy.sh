@@ -70,6 +70,83 @@ if ! command -v unzip &> /dev/null; then
 fi
 
 # -------------------------------------------------
+# 2a. Kiểm tra và vô hiệu hóa Apache/Nginx nếu đang dùng port 80/443
+detect_and_disable_web_servers() {
+    local found=false
+    local services_to_disable=()
+
+    # Phát hiện Apache
+    if command -v apache2 &>/dev/null || command -v httpd &>/dev/null; then
+        found=true
+        if systemctl is-active --quiet apache2 2>/dev/null; then
+            services_to_disable+=("apache2")
+        fi
+        if systemctl is-active --quiet httpd 2>/dev/null; then
+            services_to_disable+=("httpd")
+        fi
+    fi
+
+    # Phát hiện Nginx
+    if command -v nginx &>/dev/null; then
+        if systemctl is-active --quiet nginx 2>/dev/null; then
+            services_to_disable+=("nginx")
+        fi
+    fi
+
+    # Nếu không có service nào đang chạy, kiểm tra thêm bằng port
+    if [ ${#services_to_disable[@]} -eq 0 ]; then
+        local port80_process
+        port80_process=$(ss -tlnp 2>/dev/null | grep ':80 ' | head -1)
+        local port443_process
+        port443_process=$(ss -tlnp 2>/dev/null | grep ':443 ' | head -1)
+
+        if [ -n "$port80_process" ] || [ -n "$port443_process" ]; then
+            echo -e "${YELLOW}Phát hiện process đang listen trên port 80/443 (có thể là Apache/Nginx).${NC}"
+            echo -e "${YELLOW}Chi tiết:${NC}"
+            [ -n "$port80_process" ] && echo -e "${YELLOW}  Port 80: $port80_process${NC}"
+            [ -n "$port443_process" ] && echo -e "${YELLOW}  Port 443: $port443_process${NC}"
+            echo -e "${YELLOW}Vui lòng kiểm tra thủ công và tắt service nếu cần.${NC}"
+        fi
+    fi
+
+    # Vô hiệu hóa và gỡ bỏ các service tìm thấy
+    for svc in "${services_to_disable[@]}"; do
+        echo -e "${YELLOW}Phát hiện $svc đang chạy. Tiến hành dừng, vô hiệu hóa và gỡ bỏ...${NC}"
+        systemctl stop "$svc" 2>/dev/null
+        systemctl disable "$svc" 2>/dev/null
+
+        # Gỡ bỏ package tương ứng
+        local pkg_name=""
+        case "$svc" in
+            apache2) pkg_name="apache2" ;;
+            httpd)   pkg_name="httpd" ;;
+            nginx)   pkg_name="nginx" ;;
+        esac
+
+        if [ -n "$pkg_name" ]; then
+            echo -e "${YELLOW}Đang gỡ bỏ $pkg_name...${NC}"
+            if command -v apt-get &>/dev/null; then
+                apt-get purge -y "$pkg_name" 2>/dev/null
+                apt-get autoremove -y 2>/dev/null
+            elif command -v dnf &>/dev/null; then
+                dnf remove -y "$pkg_name" 2>/dev/null
+            elif command -v yum &>/dev/null; then
+                yum remove -y "$pkg_name" 2>/dev/null
+            fi
+            echo -e "${GREEN}✓ Đã gỡ bỏ $pkg_name${NC}"
+        fi
+
+        echo -e "${GREEN}✓ Đã dừng, vô hiệu hóa và gỡ bỏ $svc thành công${NC}"
+    done
+
+    if [ "$found" = false ] && [ ${#services_to_disable[@]} -eq 0 ]; then
+        log "Không phát hiện Apache/Nginx đang chạy. Tiếp tục..."
+    fi
+}
+
+detect_and_disable_web_servers
+
+# -------------------------------------------------
 # 2b. Cài đặt và cấu hình firewall (ufw cho Debian/Ubuntu, firewalld cho RHEL)
 if command -v apt-get >/dev/null 2>&1; then
     if ! command -v ufw >/dev/null 2>&1; then
