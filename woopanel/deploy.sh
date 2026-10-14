@@ -148,6 +148,22 @@ detect_and_disable_web_servers
 
 # -------------------------------------------------
 # 2b. Cài đặt và cấu hình firewall (ufw cho Debian/Ubuntu, firewalld cho RHEL)
+
+# Lấy port SSH thực tế để không tự khoá mình khi bật firewall (SSH có thể chạy port khác 22).
+detect_ssh_ports() {
+    local ports=""
+    if command -v sshd >/dev/null 2>&1; then
+        ports="$(sshd -T 2>/dev/null | awk '$1 == "port" {print $2}' | sort -un | tr '\n' ' ')"
+    fi
+    if [ -z "${ports// /}" ] && command -v ss >/dev/null 2>&1; then
+        ports="$(ss -ltnpH 2>/dev/null | awk '/"sshd"/ {n = split($4, a, ":"); print a[n]}' | sort -un | tr '\n' ' ')"
+    fi
+    [ -n "${ports// /}" ] || ports="22"
+    printf '%s\n' "$ports"
+}
+SSH_PORTS="$(detect_ssh_ports)"
+log "Detected SSH port(s): ${SSH_PORTS}"
+
 if command -v apt-get >/dev/null 2>&1; then
     if ! command -v ufw >/dev/null 2>&1; then
         log "Installing ufw firewall..."
@@ -156,7 +172,9 @@ if command -v apt-get >/dev/null 2>&1; then
 
     if command -v ufw >/dev/null 2>&1; then
         log "Configuring ufw firewall..."
-        ufw allow OpenSSH || ufw allow 22/tcp
+        for ssh_port in $SSH_PORTS; do
+            ufw allow "${ssh_port}/tcp"
+        done
         ufw allow 80/tcp
         ufw allow 443/tcp
         ufw allow 8888/tcp
@@ -177,6 +195,9 @@ elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
         log "Configuring firewalld..."
         systemctl enable --now firewalld
         firewall-cmd --permanent --add-service=ssh
+        for ssh_port in $SSH_PORTS; do
+            [ "$ssh_port" = "22" ] || firewall-cmd --permanent --add-port="${ssh_port}/tcp"
+        done
         firewall-cmd --permanent --add-service=http
         firewall-cmd --permanent --add-service=https
         firewall-cmd --permanent --add-port=8888/tcp
